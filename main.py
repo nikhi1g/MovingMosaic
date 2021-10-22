@@ -24,26 +24,33 @@ joystick = Joystick(0, False)
 class Runner():
     JoystickIsOn = False
     SensingIsOn = False
+    Endstop = False
     switch = 0
     Prox_Sensor_Number = 10000000
+    od = odrive.find_any()
+    whichaxis = 'eeee'#creates an axis
     def start_prox_thread(self):#thread checking gpio, sensing
         print('Starting Proximity Sensor Thread on GPIO', self.Prox_Sensor_Number)
         self.SensingIsOn = True
         Thread(target = self.prox_update).start()
     def prox_update(self):
         print('Running Proximity Sensor Thread on GPIO', self.Prox_Sensor_Number)
-
-
-
         while self.SensingIsOn:
-            print(self.ax.axis.min_endstop.endstop_state, 'Prox_Sensor_State')
-            sleep(0.5)
-            # if self.ax.axis.min_endstop.endstop_state: #if switch, or in this case the prox is pressed
-            #     print('Reached Prox on GPIO',self.Prox_Sensor_Number)
-            #     sleep(0.2)
-            # else: #elif not self.ax.axis.min_endstop.endstop_state:# if switch,or in this case the prox is not pressed
-            #     print('GPIO',self.Prox_Sensor_Number,'Not Reached')
-            #     sleep(4)
+            # print(self.ax.axis.min_endstop.endstop_state, 'Prox_Sensor_State')
+            # sleep(0.5)
+            if self.ax.axis.min_endstop.endstop_state: #if switch, or in this case the prox is pressed
+                #clear errors will get rid of freeze man
+                print('Reached Prox on GPIO',self.Prox_Sensor_Number)
+                od.clear_errors()
+                self.ax.set_vel(-1)
+                sleep(0.2)
+                # self.ax.axis.min_endstop.config.enabled = True
+                self.ax.set_vel(0)
+
+
+            if not self.ax.axis.min_endstop.endstop_state:# if switch,or in this case the prox is not pressed
+                print('GPIO',self.Prox_Sensor_Number,'Not Reached')
+                sleep(4)
     def start_joy_thread(self):
         print("Starting Joystick Thread")
         self.JoystickIsOn = True
@@ -56,16 +63,17 @@ class Runner():
 
         sped = 0
         rawpos = self.ax.get_raw_pos()
-        print("Joystick is",self.JoystickIsOn)
+        if self.JoystickIsOn:
+            print("Joystick is On")
         while self.JoystickIsOn:#previously True to avoid errors
             if joystick.get_button_state(0) == 1 and 10 > rawpos > -3.7: #Trigger Button
                 print(self.ax.get_pos())
-                time1 = 0.2
-                if self.switch == 0: #left?
+                time1 = 0.15
+                if self.switch == 0: #left?in?
                     self.ax.set_vel(sped)
                     self.switch = 1
                     sleep(time1)
-                elif self.switch == 1: #right?
+                elif self.switch == 1: #out?
                     self.ax.set_vel(-sped)
                     self.switch = 0
                     sleep(time1)
@@ -91,6 +99,17 @@ class Runner():
                 sped += 1 #increase speed
                 sleep(0.3)
 
+            if joystick.get_button_state(9) == 1: #button 10
+                #print('Erasing current configuration')
+                #od.erase_configuration()
+                print('Save configuration and reboot')
+                od.save_configuration()
+                print('Saving Configuration...')
+                sleep(4)
+                od.reboot()
+                print('rebooting...')
+
+
 
     def onstartup(self):
         ODrive_Ease_Lib.dump_errors(od)
@@ -106,6 +125,7 @@ class Runner():
         axisshortcut.min_endstop.config.enabled = True #Turns sensor on, says that I am using it
         axisshortcut.min_endstop.config.offset = 1# stops 1 rotation away from sensor
         axisshortcut.min_endstop.config.debounce_ms = 20#checks again after 20 milliseconds if actually pressed, which is what debounce is :D
+        axisshortcut.min_endstop.config.offset = -1.0 * (8192)# hop back from GPIO in order to allow for function again
         od.config.gpio8_mode = GPIO_MODE_DIGITAL_PULL_DOWN
 
 
