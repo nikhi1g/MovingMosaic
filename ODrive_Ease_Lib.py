@@ -21,9 +21,9 @@ def find_odrive():
 
 
 def find_odrives():
-    dev = usb.core.find(find_all=1, idVendor=0x1209, idProduct=0x0d32)#finding all usb connections you have
-    ods = [] #empty list of odrives
-    try: # toconnect to every single odrive it finds
+    dev = usb.core.find(find_all=1, idVendor=0x1209, idProduct=0x0d32)
+    ods = []
+    try:
         while True:
             a = next(dev)
             ods.append(odrive.find_any('usb:%s:%s' % (a.bus, a.address)))
@@ -65,6 +65,10 @@ class ODrive_Axis(object):
         self.axis.motor.config.current_lim = current_lim  # defaults to 10 Amps
         self.axis.controller.config.vel_limit = vel_lim   # defaults at 10 turns/s
 
+    # 'frees' the motor from closed loop control
+    def idle(self):
+        self.axis.requested_state = AXIS_STATE_IDLE
+
     # enters full calibration sequence (calibrates motor and encoder)
     def calibrate(self, state=AXIS_STATE_FULL_CALIBRATION_SEQUENCE):
         self.axis.requested_state = state
@@ -77,7 +81,7 @@ class ODrive_Axis(object):
                 return False
         return True
 
-    def calibrate_with_current(self, curr_lim):
+    def calibrate_with_current_lim(self, curr_lim):
         original_curr = self.get_current_limit()
         self.set_current_limit(curr_lim)
         self.calibrate()
@@ -118,7 +122,8 @@ class ODrive_Axis(object):
 
     # sets the motor to a specified velocity. Does not go over the velocity limit
     def set_vel(self, vel):
-        self.axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+        if self.axis.current_state != AXIS_STATE_CLOSED_LOOP_CONTROL:
+            self.axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
         self.axis.controller.config.input_mode = INPUT_MODE_PASSTHROUGH
         self.axis.controller.config.control_mode = CONTROL_MODE_VELOCITY_CONTROL
 
@@ -135,12 +140,11 @@ class ODrive_Axis(object):
     # Uses ramped velocity control where the speed, vel [turns/s], will be gradually reached
     # with acceleration, accel [turns/s^2].
     def set_ramped_vel(self, vel, accel):
-        if self.axis.requested_state != AXIS_STATE_CLOSED_LOOP_CONTROL:
+        assert accel >= 0, "Acceleration must be positive"
+        if self.axis.current_state != AXIS_STATE_CLOSED_LOOP_CONTROL:
             self.axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
-        if self.axis.controller.config.input_mode != INPUT_MODE_VEL_RAMP:
-            self.axis.controller.config.input_mode = INPUT_MODE_VEL_RAMP
-        if self.axis.controller.config.control_mode != CONTROL_MODE_VELOCITY_CONTROL:
-            self.axis.controller.config.control_mode = CONTROL_MODE_VELOCITY_CONTROL
+        self.axis.controller.config.input_mode = INPUT_MODE_VEL_RAMP
+        self.axis.controller.config.control_mode = CONTROL_MODE_VELOCITY_CONTROL
 
         self.axis.controller.config.vel_ramp_rate = accel
         self.axis.controller.input_vel = vel
@@ -158,7 +162,8 @@ class ODrive_Axis(object):
 
     # sets the desired position relative to the encoder
     def set_raw_pos(self, pos):
-        self.axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+        if self.axis.current_state != AXIS_STATE_CLOSED_LOOP_CONTROL:
+            self.axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
         self.axis.controller.config.input_mode = INPUT_MODE_PASSTHROUGH
         self.axis.controller.config.control_mode = CONTROL_MODE_POSITION_CONTROL
 
@@ -178,19 +183,29 @@ class ODrive_Axis(object):
 
     # sets the desired position relative to the current position
     def set_relative_pos(self, pos):
-        self.set_raw_pos(pos + self.get_pos())
+        self.set_raw_pos(pos + self.get_raw_pos())
 
-    # TODO: Implement Trajectory Control
     # sets position using the trajectory control mode
-    #def set_pos_trap(self, pos):
-    #    desired_pos = pos + self.home
-    #    self.axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
-    #    self.axis.controller.config.control_mode = CTRL_MODE_TRAJECTORY_CONTROL
-    #    self.axis.controller.move_to_pos(desired_pos)
+    def set_pos_traj(self, pos, accel, vel, decel, inertia=0):
+        # BUG: trajectory control not working when invoked after a velocity control, this line is used to
+        # uselessly revert back to position control
+        self.set_relative_pos(0)
+
+        self.axis.trap_traj.config.accel_limit = accel
+        self.axis.trap_traj.config.vel_limit = vel
+        self.axis.trap_traj.config.decel_limit = decel
+        self.axis.controller.config.inertia = inertia
+        assert accel >= 0 and vel >= 0 and decel >= 0 and inertia >= 0, "Values must be positive"
+        if self.axis.current_state != AXIS_STATE_CLOSED_LOOP_CONTROL:
+            self.axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+        self.axis.controller.config.control_mode = CONTROL_MODE_POSITION_CONTROL
+        self.axis.controller.config.input_mode = INPUT_MODE_TRAP_TRAJ
+        self.axis.controller.input_pos = pos + self.home
 
     # sets the current sent to the motor
     def set_current(self, curr):  # this is now torque control
-        self.axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+        if self.axis.current_state != AXIS_STATE_CLOSED_LOOP_CONTROL:
+            self.axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
         self.axis.controller.config.input_mode = INPUT_MODE_PASSTHROUGH
         self.axis.controller.config.control_mode = CONTROL_MODE_TORQUE_CONTROL
 
@@ -322,7 +337,8 @@ class ODrive_Axis(object):
         if not(dir == 1 or dir == -1):
             raise Exception("direction should be 1 or -1")
 
-        self.axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+        if self.axis.current_state != AXIS_STATE_CLOSED_LOOP_CONTROL:
+            self.axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
         self.axis.controller.config.control_mode = CONTROL_MODE_TORQUE_CONTROL
 
         self.axis.controller.input_torque = torque * dir * -1  # multiply by -1 to make this make actual sense
@@ -357,17 +373,6 @@ class ODrive_Axis(object):
         self.axis.controller.error = 0
         #There is also sensorless estimator errors but those are super rare and I am not sure what the object field is called to ima just leave it
 
-    ##################################################
-    ##########     TESTING FUNCTIONS        ##########
-    ##################################################
-
-    # TODO: Implement saving configurations and loading configurations from file
-    # TODO: https://github.com/odriverobotics/ODrive/blob/master/tools/odrive/configuration.py
-
-    def idle(self):
-        self.axis.requested_state = AXIS_STATE_IDLE
-
-
 
 class double_ODrive(object):
 
@@ -397,7 +402,7 @@ class double_ODrive(object):
         self.x.set_vel(vel_x)
         self.y.set_vel(vel_y)
         time.sleep(1)
-        while (self.x.is_busy() or self.y.is_busy()):
+        while self.x.is_busy() or self.y.is_busy():
             time.sleep(0.3)
 
         time.sleep(1)
@@ -413,7 +418,7 @@ class double_ODrive(object):
         self.y.axis.max_endstop.config.enabled = True
         self.x.set_vel(vel_x)
         self.y.set_vel(vel_y)
-        while (self.x.axis.error == 0 or self.y.axis.error == 0):
+        while self.x.axis.error == 0 or self.y.axis.error == 0:
             pass
         if self.x.axis.error == 0x800 or self.x.axis.error == 0x1000:
             self.x.set_zero(self.x.get_raw_pos())
@@ -468,4 +473,4 @@ def configure_hoverboard(ax):
     ax.axis.controller.config.vel_gain = 0.02
     ax.axis.controller.config.vel_integrator_gain = 0.1
     ax.axis.controller.config.vel_limit = 1000
-    ax.axis.controller.config.control_mode = CTRL_MODE_VELOCITY_CONTROL
+    ax.axis.controller.config.control_mode = CONTROL_MODE_VELOCITY_CONTROL

@@ -34,12 +34,12 @@ class Runner():
         while self.JoystickIsOn:
             x = self.joystick.get_axis('x')
             y = self.joystick.get_axis('y')
-            if 0.2 > x > -0.2:
+            if 0.2 > x > -0.2:#stops
                 self.ax.set_vel(0)
                 sleep(0.2)
-            if y == 0:
-                self.ay.set_vel(0)
-                sleep(0.2)
+            if y == 0: #should decel to a stop, but is does not
+                self.ay.set_ramped_vel(0,8)
+                sleep(0.3)
             if x > 0.2:#x actions
                 self.ax.set_vel(speed)
                 print('x pos:',self.joystick.get_axis('x'))
