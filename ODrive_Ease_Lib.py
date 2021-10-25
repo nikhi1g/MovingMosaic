@@ -21,9 +21,9 @@ def find_odrive():
 
 
 def find_odrives():
-    dev = usb.core.find(find_all=1, idVendor=0x1209, idProduct=0x0d32)
-    ods = []
-    try:
+    dev = usb.core.find(find_all=1, idVendor=0x1209, idProduct=0x0d32)#finding all usb connections you have
+    ods = [] #empty list of odrives
+    try: # toconnect to every single odrive it finds
         while True:
             a = next(dev)
             ods.append(odrive.find_any('usb:%s:%s' % (a.bus, a.address)))
