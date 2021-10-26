@@ -87,7 +87,14 @@ class ODrive_Axis(object):
         self.calibrate()
         self.set_current_limit(original_curr)
 
-    # enters encoder offset calibration
+    def gainz(self, pos_gain, vel_gain, vel_integrator_gain, boolean_overspeed_error):
+        self.set_pos_gain(pos_gain)
+        self.set_vel_gain(vel_gain)
+        self.set_vel_integrator_gain(vel_integrator_gain)
+        self.axis.controller.config.enable_overspeed_error = boolean_overspeed_error
+
+
+
     def calibrate_encoder(self):
         return self.calibrate(AXIS_STATE_ENCODER_OFFSET_CALIBRATION)
 
